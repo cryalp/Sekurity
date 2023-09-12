@@ -1,30 +1,37 @@
+import datetime
 import os
 import subprocess
 
 blockedIpList = {}
+newBlockedIpList = {}
 ignoredIpList = ["91.151.88.110"]
-reportedIpFile = "_reportedIpList.csv"
 
-if not os.path.isfile(reportedIpFile):
-    file = open(reportedIpFile, "a+")
-    file.close()
+reportedDir = "reportedDir\\"
+if not os.path.exists(reportedDir):
+    os.makedirs(reportedDir)
 
-
-with open(reportedIpFile) as file:
-    for num, line in enumerate(file, 1):
-        ip = line.split(",")[0].strip()
-        if blockedIpList.get(ip) is None:
-            blockedIpList[ip] = set()
+reportedDirFileList = os.listdir(reportedDir)
+for reportedFile in reportedDirFileList:
+    reportedFile = os.path.abspath(reportedDir + reportedFile)
+    print("Reported file: " + reportedFile)
+    with open(reportedFile) as file:
+        for num, line in enumerate(file, 1):
+            ip = line.split(",")[0].strip()
+            if ip in ignoredIpList:
+                continue
+            if blockedIpList.get(ip) is None:
+                blockedIpList[ip] = set()
 
 searchDir = "C:\\DIRECTORY_TO_BE_LISTED\\"
-dir_list = os.listdir(searchDir)
+dir_list = [
+    searchDir + f for f in os.listdir(searchDir) if os.path.isfile(searchDir + f)
+]
 print("Files and directories:")
 for dir in dir_list:
-    if (".log" not in dir or dir == os.path.basename(__file__) or dir == reportedIpFile):
+    if ".log" not in dir or dir == os.path.basename(__file__):
         continue
-    currentDir = searchDir + dir
-    print(currentDir)
-    with open(currentDir) as file:
+    print(dir)
+    with open(dir) as file:
         for num, line in enumerate(file, 1):
             if "Invalid" in line:
                 separator = " " if "ex" in dir else "\t"
@@ -33,24 +40,34 @@ for dir in dir_list:
                 if ip in ignoredIpList:
                     continue
                 data = ip + "," + ",".join(splittedLine)
-                if blockedIpList.get(ip) is None:
-                    blockedIpList[ip] = set()
-                blockedIpList[ip].add(data)
+                if blockedIpList.get(ip) is not None:
+                    continue
+                if newBlockedIpList.get(ip) is None:
+                    newBlockedIpList[ip] = set()
+                newBlockedIpList[ip].add(data)
 
-file = open(reportedIpFile, "a+")
+now = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+reportedIpFile = reportedDir + now + "_reportedIpList.csv"
 
 blockedIpStr = ""
 for blockedIp in blockedIpList:
     blockedIpStr += blockedIp + ","
-    for blockedIpDetail in blockedIpList[blockedIp]:
-        file.write(blockedIpDetail)
 
-file.close()
+if len(newBlockedIpList) > 0:
+    reportedNewFile = open(reportedIpFile, "a+")
+
+    for blockedIp in newBlockedIpList:
+        blockedIpStr += blockedIp + ","
+        for blockedIpDetail in newBlockedIpList[blockedIp]:
+            reportedNewFile.write(blockedIpDetail)
+
+    reportedNewFile.close()
 
 ruleName = "Automated banned IPs"
 command = f'netsh advfirewall firewall delete rule "{ruleName}"'
 secondCommand = f'netsh advfirewall firewall add rule name="{ruleName}" dir=in action=block protocol=ANY remoteip="{",".join(blockedIpList)}"'
-print(command+";"+secondCommand)
+print(command + ";" + secondCommand)
 
-subprocess.call(command, shell=True)
-subprocess.call(secondCommand, shell=True)
+if len(blockedIpStr) > 0:
+    subprocess.call(command, shell=True)
+    subprocess.call(secondCommand, shell=True)
