@@ -1,10 +1,11 @@
 import datetime
 import os
 import subprocess
+import ipaddress
 
 blockedIpList = {}
 newBlockedIpList = {}
-ignoredIpList = ["91.151.88.110"]
+ignoredIpList = ["::1", "91.151.88.110"]
 
 reportedDir = "reportedDir\\"
 if not os.path.exists(reportedDir):
@@ -22,7 +23,7 @@ for reportedFile in reportedDirFileList:
             if blockedIpList.get(ip) is None:
                 blockedIpList[ip] = set()
 
-searchDir = "C:\\DIRECTORY_TO_BE_LISTED\\"
+searchDir = "C:\\Program Files (x86)\\Mail Enable\\Logging\\SMTP\\"
 dir_list = [
     searchDir + f for f in os.listdir(searchDir) if os.path.isfile(searchDir + f)
 ]
@@ -33,7 +34,7 @@ for dir in dir_list:
     print(dir)
     with open(dir) as file:
         for num, line in enumerate(file, 1):
-            if "Invalid" in line:
+            if "Invalid Username or Password" in line:
                 separator = " " if "ex" in dir else "\t"
                 splittedLine = line.split(separator)
                 ip = splittedLine[2 if "ex" in dir else 4].strip()
@@ -63,11 +64,47 @@ if len(newBlockedIpList) > 0:
 
     reportedNewFile.close()
 
-ruleName = "Automated banned IPs"
-command = f'netsh advfirewall firewall delete rule "{ruleName}"'
-secondCommand = f'netsh advfirewall firewall add rule name="{ruleName}" dir=in action=block protocol=ANY remoteip="{",".join(blockedIpList)}"'
-print(command + ";" + secondCommand)
+blockedIpStr = blockedIpStr[:-1]
+blockedIpList = sorted(blockedIpStr.split(","), key=ipaddress.IPv4Address)
 
-if len(blockedIpStr) > 0:
-    subprocess.call(command, shell=True)
-    subprocess.call(secondCommand, shell=True)
+ruleName = "Automated banned IPs"
+
+command = f'netsh advfirewall firewall delete rule "{ruleName}"'
+ruleCountCommand = f'(netsh advfirewall firewall show rule name=all | find "Rule Name:" | find "{ruleName}").Count'
+# print(command + ";" + secondCommand)
+
+if len(blockedIpList) > 0:
+    # subprocess.call(command, shell=True)
+
+    blockedIpStrList = []
+    tempBlockedIpStr = ""
+    for blockedIp in blockedIpList:
+        if len(tempBlockedIpStr + blockedIp) >= 8000:
+            blockedIpStrList.append(tempBlockedIpStr[:-1])
+            tempBlockedIpStr = ""
+        tempBlockedIpStr += blockedIp + ","
+
+    blockedIpStrList.append(tempBlockedIpStr[:-1])
+
+    ruleCount = int(
+        str(
+            subprocess.run(
+                ["powershell", "-Command", ruleCountCommand],
+                capture_output=True,
+                text=True,
+            ).stdout
+        ).replace("\n", "")
+    )
+    
+    print("Blocked: " + str(len(blockedIpList)))
+
+    for counter in range(ruleCount):
+        secondCommand = f'netsh advfirewall firewall set rule name="{ruleName + " " + str(counter)}" new remoteip="{blockedIpStrList[counter]}"'
+        subprocess.call(secondCommand, shell=True)
+        # print(secondCommand)
+
+    if ruleCount < len(blockedIpStrList):
+        for counter in range(ruleCount, len(blockedIpStrList)):
+            secondCommand = f'netsh advfirewall firewall add rule name="{ruleName + " " + str(counter)}" dir=in action=block protocol=ANY remoteip="{blockedIpStrList[counter]}"'
+            subprocess.call(secondCommand, shell=True)
+            # print(secondCommand)
