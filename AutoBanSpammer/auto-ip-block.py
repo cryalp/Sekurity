@@ -27,6 +27,8 @@ searchDir = "C:\\Program Files (x86)\\Mail Enable\\Logging\\SMTP\\"
 dir_list = [
     searchDir + f for f in os.listdir(searchDir) if os.path.isfile(searchDir + f)
 ]
+
+unwantedLogList = ["Invalid Username or Password", "AUTH LOGIN	500 Syntax error"]
 print("Files and directories:")
 for dir in dir_list:
     if ".log" not in dir or dir == os.path.basename(__file__):
@@ -34,7 +36,7 @@ for dir in dir_list:
     print(dir)
     with open(dir) as file:
         for num, line in enumerate(file, 1):
-            if "Invalid Username or Password" in line:
+            if any(unwantedLog in line for unwantedLog in unwantedLogList):
                 separator = " " if "ex" in dir else "\t"
                 splittedLine = line.split(separator)
                 ip = splittedLine[2 if "ex" in dir else 4].strip()
