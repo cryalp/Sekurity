@@ -2,6 +2,7 @@ import datetime
 import os
 import subprocess
 import ipaddress
+import re
 
 blockedIpList = {}
 newBlockedIpList = {}
@@ -28,7 +29,14 @@ dir_list = [
     searchDir + f for f in os.listdir(searchDir) if os.path.isfile(searchDir + f)
 ]
 
-unwantedLogList = ["Invalid Username or Password", "AUTH LOGIN	500 Syntax error"]
+unwantedLogList = [
+    "Invalid Username or Password",
+    "AUTH LOGIN	500 Syntax error",
+    "503 This mail server requires authentication when attempting to send to a non-local e-mail address",
+]
+unwantedEhloList = [r"EHLO.*alex.*\.ru"]
+newReportedEhloDomainList = []
+
 print("Files and directories:")
 for dir in dir_list:
     if ".log" not in dir or dir == os.path.basename(__file__):
@@ -48,6 +56,18 @@ for dir in dir_list:
                 if newBlockedIpList.get(ip) is None:
                     newBlockedIpList[ip] = set()
                 newBlockedIpList[ip].add(data)
+            for unwantedEhlo in unwantedEhloList:
+                if re.search(unwantedEhlo, line):
+                    splittedLine = line.split(" " if "ex" in dir else "\t")
+                    ehlo = (
+                        splittedLine[8 if "ex" in dir else 6]
+                        .strip()
+                        .split("+" if "ex" in dir else " ")[1]
+                        .split(".")
+                    )
+                    ehlo = ".".join(ehlo[1:3] if len(ehlo) > 2 else ehlo[0:2])
+                    if ehlo not in newReportedEhloDomainList:
+                        newReportedEhloDomainList.append("*" + ehlo)
 
 now = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 reportedIpFile = reportedDir + now + "_reportedIpList.csv"
@@ -97,7 +117,7 @@ if len(blockedIpList) > 0:
             ).stdout
         ).replace("\n", "")
     )
-    
+
     print("Blocked: " + str(len(blockedIpList)))
 
     for counter in range(ruleCount):
@@ -110,3 +130,62 @@ if len(blockedIpList) > 0:
             secondCommand = f'netsh advfirewall firewall add rule name="{ruleName + " " + str(counter)}" dir=in action=block protocol=ANY remoteip="{blockedIpStrList[counter]}"'
             subprocess.call(secondCommand, shell=True)
             # print(secondCommand)
+
+unwantedEHLORegeditParentPath = "HKLM"
+unwantedEHLORegeditPath = (
+    r"SOFTWARE\WOW6432Node\Mail Enable\Mail Enable\Connectors\SMTP"
+)
+unwantedEHLORegeditName = r"Blocked HELO"
+unwantedEHLORegeditKey = (
+    unwantedEHLORegeditParentPath
+    + os.sep
+    + unwantedEHLORegeditPath
+    + os.sep
+    + unwantedEHLORegeditName
+)
+unwantedEHLORegeditReadKeyCommand = (
+    r'(New-Object -ComObject WScript.Shell).RegRead("' + unwantedEHLORegeditKey + '")'
+)
+
+unwantedEHLORegeditKeyValueListStr = str(
+    subprocess.run(
+        ["powershell", "-Command", unwantedEHLORegeditReadKeyCommand],
+        capture_output=True,
+        text=True,
+    ).stdout
+)
+
+if len(unwantedEHLORegeditKeyValueListStr) > 0:
+    unwantedEHLORegeditKeyValueList = unwantedEHLORegeditKeyValueListStr.split("\n")[
+        0
+    ].split(",")
+else:
+    unwantedEHLORegeditKeyValueList = []
+
+for newReportedEhloDomain in newReportedEhloDomainList:
+    if newReportedEhloDomain in unwantedEHLORegeditKeyValueList:
+        continue
+    unwantedEHLORegeditKeyValueList.append(newReportedEhloDomain)
+
+unwantedEHLORegeditKeyValue = ",".join(unwantedEHLORegeditKeyValueList)
+
+unwantedEHLORegeditWriteKeyCommand = (
+    r"Set-ItemProperty"
+    + (
+        ' -Path "'
+        + unwantedEHLORegeditParentPath
+        + ":"
+        + os.sep
+        + unwantedEHLORegeditPath
+        + '"'
+    )
+    + (' -Name "' + unwantedEHLORegeditName + '"')
+    + (' -Value "' + unwantedEHLORegeditKeyValue + '"')
+)
+print("Reported EHLO Domains: \n" + unwantedEHLORegeditWriteKeyCommand)
+
+subprocess.run(
+    ["powershell", "-Command", unwantedEHLORegeditWriteKeyCommand],
+    capture_output=True,
+    text=True,
+)
