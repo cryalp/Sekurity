@@ -1,4 +1,5 @@
 import datetime
+from datetime import date
 import os
 import subprocess
 import ipaddress
@@ -6,13 +7,74 @@ import re
 
 blockedIpList = {}
 newBlockedIpList = {}
-ignoredIpList = ["::1", "91.151.88.110"]
+ignoredIpList = ["::1", "91.151.88.110", "46.31.77.212"]
 
 reportedDir = "reportedDir\\"
 if not os.path.exists(reportedDir):
     os.makedirs(reportedDir)
 
 reportedDirFileList = os.listdir(reportedDir)
+reportedDirFileList.sort()
+
+reportedFilePostFix = "_reportedIpList.csv"
+
+now = datetime.datetime.now()
+today = now.strftime("%Y-%m-%d")
+
+
+def mergeToUpperFile(upperDay, upperMonth):
+    reportedDayFileStr = upperDay + reportedFilePostFix
+    reportedMonthFileStr = upperMonth + reportedFilePostFix
+    for reportedFileStr in reportedDirFileList:
+        if (
+            reportedFileStr.startswith(upperDay)
+            and reportedFileStr != reportedDayFileStr
+        ):
+            reportedDayFile = open(reportedDir + reportedDayFileStr, "a+")
+            reportedFile = os.path.abspath(reportedDir + reportedFileStr)
+            if not os.path.exists(reportedFile):
+                continue
+            with open(reportedFile) as file:
+                for line in file:
+                    reportedDayFile.write(line)
+            if os.path.exists(reportedFile):
+                print("Merged:" + reportedFileStr + " into " + reportedDayFileStr)
+                os.remove(reportedFile)
+            reportedDayFile.close()
+
+        if (
+            reportedFileStr.startswith(upperMonth)
+            and reportedFileStr != reportedMonthFileStr
+            and not reportedFileStr.startswith(today)
+        ):
+            reportedMonthFile = open(reportedDir + reportedMonthFileStr, "a+")
+            reportedFile = os.path.abspath(reportedDir + reportedFileStr)
+            if not os.path.exists(reportedFile):
+                continue
+            with open(reportedFile) as file:
+                for line in file:
+                    reportedMonthFile.write(line)
+            if os.path.exists(reportedFile):
+                print("Merged: " + reportedFileStr + " into " + reportedMonthFileStr)
+                os.remove(reportedFile)
+            reportedMonthFile.close()
+
+
+for month in range(1, 13):
+    daysInMonth = (
+        date(
+            now.year + 1 if month == 12 else now.year,
+            1 if month == 12 else month + 1,
+            1,
+        )
+        - date(now.year, month, 1)
+    ).days
+    for day in range(1, daysInMonth + 1):
+        newDate = date(now.year, month, day)
+        mergeToUpperFile(newDate.strftime("%Y-%m-%d"), newDate.strftime("%Y-%m"))
+
+reportedDirFileList = os.listdir(reportedDir)
+
 for reportedFile in reportedDirFileList:
     reportedFile = os.path.abspath(reportedDir + reportedFile)
     print("Reported file: " + reportedFile)
@@ -33,6 +95,8 @@ unwantedLogList = [
     "Invalid Username or Password",
     "AUTH LOGIN	500 Syntax error",
     "503 This mail server requires authentication when attempting to send to a non-local e-mail address",
+    "503 Bad sequence of commands",
+    "503 Too many invalid commands were received",
 ]
 unwantedEhloList = [r"EHLO.*alex.*\.ru"]
 newReportedEhloDomainList = []
@@ -69,8 +133,7 @@ for dir in dir_list:
                     if ehlo not in newReportedEhloDomainList:
                         newReportedEhloDomainList.append("*" + ehlo)
 
-now = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-reportedIpFile = reportedDir + now + "_reportedIpList.csv"
+reportedIpFile = reportedDir + now.strftime("%Y-%m-%d-%H-%M-%S") + reportedFilePostFix
 
 blockedIpStr = ""
 for blockedIp in blockedIpList:
