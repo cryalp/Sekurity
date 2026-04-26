@@ -8,6 +8,7 @@ import re
 blockedIpList = {}
 newBlockedIpList = {}
 ignoredIpList = ["::1", "91.151.88.110", "46.31.77.212"]
+newReportedEhloDomainList = []
 
 reportedDir = "reportedDir\\"
 if not os.path.exists(reportedDir):
@@ -60,6 +61,59 @@ def mergeToUpperFile(upperDay, upperMonth):
             reportedMonthFile.close()
 
 
+def processMailEnableLogFile(directory):
+    with open(directory) as file:
+        for num, line in enumerate(file, 1):
+            if any(unwantedLog in line for unwantedLog in unwantedLogList):
+                separator = " " if "ex" in directory else "\t"
+                splittedLine = line.split(separator)
+                ip = splittedLine[2 if "ex" in directory else 4].strip()
+                if ip in ignoredIpList:
+                    continue
+                data = ip + "," + ",".join(splittedLine)
+                if blockedIpList.get(ip) is not None:
+                    continue
+                if newBlockedIpList.get(ip) is None:
+                    newBlockedIpList[ip] = set()
+                newBlockedIpList[ip].add(data)
+            for unwantedEhlo in unwantedEhloList:
+                if re.search(unwantedEhlo, line):
+                    splittedLine = line.split(" " if "ex" in directory else "\t")
+                    ehlo = (
+                        splittedLine[8 if "ex" in directory else 6]
+                        .strip()
+                        .split("+" if "ex" in directory else " ")[1]
+                        .split(".")
+                    )
+                    ehlo = ".".join(ehlo[1:3] if len(ehlo) > 2 else ehlo[0:2])
+                    if ehlo not in newReportedEhloDomainList:
+                        newReportedEhloDomainList.append("*" + ehlo)
+
+
+def processMSSQLLogFile(directory):
+    with open(directory) as file:
+        for num, line in enumerate(file, 1):
+            line = line.replace("\x00", "").replace("\n", "").replace("]", "")
+        
+            if not any(unwantedLog in line for unwantedLog in unwantedLogList):
+                continue
+           
+            separator = " "
+            splittedLine = line.split(separator)
+            ip = splittedLine[-1]
+            if("." not in ip):
+                continue
+            
+            if ip in ignoredIpList or blockedIpList.get(ip) is not None:
+                continue
+
+            data = ip + "," + ",".join(splittedLine[0:(len(splittedLine) - 2)]) + "\n"
+
+            if newBlockedIpList.get(ip) is None:
+                newBlockedIpList[ip] = set()
+            newBlockedIpList[ip].add(data)
+
+
 for month in range(1, 13):
     daysInMonth = (
         date(
@@ -91,47 +145,34 @@ dir_list = [
     searchDir + f for f in os.listdir(searchDir) if os.path.isfile(searchDir + f)
 ]
 
+mssqlSearchDir = "C:\Program Files (x86)\Plesk\Databases\MSSQL\MSSQL13.MSSQLSERVER2016\MSSQL\Log\\"
+for f in os.listdir(mssqlSearchDir):
+    if os.path.isfile(mssqlSearchDir + f) and "ERRORLOG" in f:
+        dir_list.append(mssqlSearchDir + f)
+
 unwantedLogList = [
     "Invalid Username or Password",
     "AUTH LOGIN	500 Syntax error",
     "503 This mail server requires authentication when attempting to send to a non-local e-mail address",
     "503 Bad sequence of commands",
     "503 Too many invalid commands were received",
+    "504 Unrecognized authentication type",
+    "Login failed for user",
 ]
-unwantedEhloList = [r"EHLO.*alex.*\.ru"]
-newReportedEhloDomainList = []
+unwantedEhloList = [r"EHLO.*alex.*\.ru", r"EHLO.*marcosto.*\.ru", r"EHLO.*ladagow.*\.ru"]
 
 print("Files and directories:")
+asd = 0
 for dir in dir_list:
-    if ".log" not in dir or dir == os.path.basename(__file__):
+    if dir == os.path.basename(__file__):
         continue
-    print(dir)
-    with open(dir) as file:
-        for num, line in enumerate(file, 1):
-            if any(unwantedLog in line for unwantedLog in unwantedLogList):
-                separator = " " if "ex" in dir else "\t"
-                splittedLine = line.split(separator)
-                ip = splittedLine[2 if "ex" in dir else 4].strip()
-                if ip in ignoredIpList:
-                    continue
-                data = ip + "," + ",".join(splittedLine)
-                if blockedIpList.get(ip) is not None:
-                    continue
-                if newBlockedIpList.get(ip) is None:
-                    newBlockedIpList[ip] = set()
-                newBlockedIpList[ip].add(data)
-            for unwantedEhlo in unwantedEhloList:
-                if re.search(unwantedEhlo, line):
-                    splittedLine = line.split(" " if "ex" in dir else "\t")
-                    ehlo = (
-                        splittedLine[8 if "ex" in dir else 6]
-                        .strip()
-                        .split("+" if "ex" in dir else " ")[1]
-                        .split(".")
-                    )
-                    ehlo = ".".join(ehlo[1:3] if len(ehlo) > 2 else ehlo[0:2])
-                    if ehlo not in newReportedEhloDomainList:
-                        newReportedEhloDomainList.append("*" + ehlo)
+    
+    print("Processing: " + dir)
+    if(".log" in dir):
+        processMailEnableLogFile(dir)
+    elif("ERRORLOG" in dir) and asd < 1:
+        processMSSQLLogFile(dir)
+        asd += 1
 
 reportedIpFile = reportedDir + now.strftime("%Y-%m-%d-%H-%M-%S") + reportedFilePostFix
 
